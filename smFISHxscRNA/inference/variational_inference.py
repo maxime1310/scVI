@@ -51,14 +51,16 @@ class VariationalInferenceFish(InferenceFish):
         sample_batch, local_l_mean, local_l_var, batch_index, _ = tensors_seq
         reconst_loss, kl_divergence = self.model(sample_batch, local_l_mean, local_l_var, batch_index, mode="scRNA")
         loss = torch.mean(reconst_loss + self.kl_weight * kl_divergence)
-        sample_batch, local_l_mean, local_l_var, batch_index, _ = tensors_fish
-        reconst_loss, kl_divergence = self.model(sample_batch, local_l_mean, local_l_var, batch_index, mode="smFISH")
-        loss_fish = torch.mean(reconst_loss + self.kl_weight * kl_divergence)\
-                    * self.model.n_input / self.model.n_input_fish
+        sample_batch_fish, local_l_mean, local_l_var, batch_index, _ = tensors_fish
+        reconst_loss, kl_divergence = self.model(sample_batch_fish, local_l_mean, local_l_var, batch_index, mode="smFISH")
+        loss_fish = torch.mean(reconst_loss + self.kl_weight * kl_divergence)
+                    # * self.model.n_input / self.model.n_input_fish
+        loss = loss * sample_batch.size(0) + loss_fish * sample_batch_fish.size(0)
+        loss /= (sample_batch.size(0) + sample_batch_fish.size(0))
         return loss + loss_fish
 
     def on_epoch_begin(self):
-        self.kl_weight = self.kl if self.kl is not None else min(1, 1e-2 * self.epoch / self.n_epochs)
+        self.kl_weight = self.kl if self.kl is not None else min(1, 1/4000 * self.epoch / self.n_epochs)
 
     def ll(self, name, verbose=True):
         if name == 'train_seq' or name == 'test_seq':

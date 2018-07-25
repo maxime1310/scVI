@@ -98,7 +98,12 @@ class CortexDataset(GeneExpressionDataset):
         selected = np.array([int(select) for select in selected])
         expression_data = expression_data[:, selected]
         gene_names = gene_names[selected]
-        expression_data, gene_names = reorganize(expression_data, gene_names, self.genes_fish)
 
+        indexes_to_keep = np.arange(len(self.genes_fish))
+        indexes_to_keep = np.delete(indexes_to_keep, self.genes_to_discard)
+        expression_data, gene_names = reorganize(expression_data, gene_names, self.genes_fish[indexes_to_keep])
+        umi = np.sum(expression_data, axis=1)
+        expression_data = expression_data[umi > 10, :]
+        labels = labels[umi > 10]
         print("Finished preprocessing Cortex data")
         return expression_data, labels, gene_names

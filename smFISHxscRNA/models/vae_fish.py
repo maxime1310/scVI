@@ -41,7 +41,7 @@ class VAEF(nn.Module):
     """
 
     def __init__(self, n_input, n_input_fish, genes_to_discard=None, n_batch=0, n_labels=0, n_hidden=128, n_latent=10,
-                 n_layers=1, dropout_rate=0.1,
+                 n_layers=1, dropout_rate=0.3,
                  dispersion="gene", log_variational=True, reconstruction_loss="zinb", reconstruction_loss_fish="poisson"):
         super(VAEF, self).__init__()
 
@@ -78,7 +78,7 @@ class VAEF(nn.Module):
         self.z_final_encoder = Encoder(n_hidden, n_latent, n_hidden=n_hidden, n_layers=n_layers,
                                        dropout_rate=dropout_rate)
 
-        self.decoder = DecoderSCVI(n_latent, n_input, n_layers=n_layers, n_hidden=n_hidden,
+        self.decoder = DecoderSCVI(n_latent, n_input, n_layers=n_layers, n_hidden=n_hidden, n_cat_list=[2],
                                    dropout_rate=dropout_rate)
 
     def get_latents(self, x, y=None):
@@ -148,7 +148,7 @@ class VAEF(nn.Module):
             qz_m, qz_v, z = self.z_encoder_fish(x_[:, self.indexes_to_keep])
             library = torch.log(torch.sum(x[:, self.indexes_to_keep], dim=1)).view(-1, 1)
             batch_index = torch.ones_like(library)
-        qz_m, qz_v, z = self.z_final_encoder(z)
+        qz_m, qz_v, z = self.z_final_encoder(qz_m)
         px_scale, px_r, px_rate, px_dropout = self.decoder(self.dispersion, z, library, batch_index)
 
         # rescaling the expected frequencies

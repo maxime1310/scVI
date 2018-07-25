@@ -2,26 +2,32 @@ import numpy as np
 import scipy
 import torch
 from sklearn.neighbors import NearestNeighbors
-
-
-def get_latent_mean(vae, data_loader):
-    return get_latent(vae, data_loader)
+from sklearn.manifold import TSNE
 
 
 def get_latent(vae, data_loader, mode):
     latent = []
     batch_indices = []
     labels = []
+    x_coords = []
+    y_coords = []
     for tensors in data_loader:
-        sample_batch, local_l_mean, local_l_var, batch_index, label = tensors
         if mode == "scRNA":
+            sample_batch, local_l_mean, local_l_var, batch_index, label = tensors
             batch_index = torch.zeros_like(batch_index)
         if mode == "smFISH":
+            sample_batch, local_l_mean, local_l_var, batch_index, label, x_coords, y_coords = tensors
             batch_index = torch.ones_like(batch_index)
+            x_coords += [x_coords]
+            y_coords += [y_coords]
         latent += [vae.sample_from_posterior_z(sample_batch, y=label, mode=mode)]
         batch_indices += [batch_index]
         labels += [label]
-    return np.array(torch.cat(latent)), np.array(torch.cat(batch_indices)), np.array(torch.cat(labels)).ravel()
+    if mode == "scRNA":
+        return np.array(torch.cat(latent)), np.array(torch.cat(batch_indices)), np.array(torch.cat(labels)).ravel()
+    elif mode == "smFISH":
+        return np.array(torch.cat(latent)), np.array(torch.cat(batch_indices)), np.array(torch.cat(labels)).ravel(),
+    np.array(torch.cat(x_coords)), np.array(torch.cat(y_coords))
 
 
 def get_data(vae, data_loader, mode):
@@ -30,19 +36,40 @@ def get_data(vae, data_loader, mode):
     labels = []
     expected_frequencies = []
     values = []
+    x_coords = []
+    y_coords = []
     for tensors in data_loader:
-        sample_batch, local_l_mean, local_l_var, batch_index, label = tensors
         if mode == "scRNA":
+            sample_batch, local_l_mean, local_l_var, batch_index, label = tensors
             batch_index = torch.zeros_like(batch_index)
         if mode == "smFISH":
+            sample_batch, local_l_mean, local_l_var, batch_index, label, x_coord, y_coord = tensors
             batch_index = torch.ones_like(batch_index)
+            x_coords += [x_coord]
+            y_coords += [y_coord]
         latent += [vae.sample_from_posterior_z(sample_batch, y=label, mode=mode)]
         batch_indices += [batch_index]
         labels += [label]
-        expected_frequencies += [vae.get_sample_scale(sample_batch, batch_index)]
+        expected_frequencies += [vae.get_sample_scale(sample_batch, mode=mode, batch_index=batch_index)]
         values += [sample_batch]
-    return np.array(torch.cat(latent)), np.array(torch.cat(batch_indices)), np.array(torch.cat(labels)).ravel(), \
+    if mode == "scRNA":
+        return np.array(torch.cat(latent)), np.array(torch.cat(batch_indices)), np.array(torch.cat(labels)).ravel(), \
         np.array(torch.cat(expected_frequencies)), np.array(torch.cat(values))
+    if mode == "smFISH":
+        return np.array(torch.cat(latent)), np.array(torch.cat(batch_indices)), np.array(torch.cat(labels)).ravel(), \
+               np.array(torch.cat(expected_frequencies)), np.array(torch.cat(values)),\
+               np.array(torch.cat(x_coords)), np.array(torch.cat(y_coords))
+
+
+def get_common_t_sne(latent_a, latent_b, n_samples=1000):
+    idx_t_sne_a = np.random.permutation(len(latent_a))[:n_samples]
+    idx_t_sne_b = np.random.permutation(len(latent_a))[:n_samples]
+    full_latent = np.concatenate((latent_a[idx_t_sne_a, :], latent_b[idx_t_sne_b, :]))
+    if full_latent.shape[1] != 2:
+        latent = TSNE().fit_transform(full_latent)
+    if latent.shape[0] != len(idx_t_sne_a) + len(idx_t_sne_b):
+        print("Be careful! There might be a mistake in the downsampling of the data points")
+    return latent[:len(idx_t_sne_a), :], latent[len(idx_t_sne_a):, :], idx_t_sne_a, idx_t_sne_b
 
 
 def nn_overlap(X1, X2, k=100):
