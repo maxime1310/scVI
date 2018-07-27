@@ -9,6 +9,7 @@ from torch.distributions import Normal, Poisson, kl_divergence as kl
 
 from scvi.metrics.log_likelihood import log_zinb_positive, log_nb_positive
 from scvi.models.modules import Encoder, DecoderSCVI
+from scvi.models.classifier import Classifier
 from scvi.models.utils import one_hot
 
 torch.backends.cudnn.benchmark = True
@@ -40,26 +41,25 @@ class VAEF(nn.Module):
 
     """
 
-    def __init__(self, n_input, n_input_fish, genes_to_discard=None, n_batch=0, n_labels=0, n_hidden=128, n_latent=10,
-                 n_layers=1, dropout_rate=0.3,
-                 dispersion="gene", log_variational=True, reconstruction_loss="zinb", reconstruction_loss_fish="poisson"):
+    def __init__(self, n_input, indexes_fish_train=None, n_batch=0, n_labels=0, n_hidden=128, n_latent=10,
+                 n_layers=1, n_layers_decoder=1, dropout_rate=0.3, weight=True,
+                 dispersion="gene", log_variational=True, reconstruction_loss="zinb", reconstruction_loss_fish="poisson", model_library=False):
         super(VAEF, self).__init__()
 
         self.n_input = n_input
-        self.n_input_fish = n_input_fish - len(genes_to_discard)
-        self.indexes_to_keep = np.arange(n_input_fish)
-        self.indexes_to_keep = np.delete(self.indexes_to_keep, genes_to_discard)
-
+        self.n_input_fish = len(indexes_fish_train)
+        self.indexes_to_keep = indexes_fish_train
         self.dispersion = dispersion
         self.n_latent = n_latent
         self.log_variational = log_variational
         self.reconstruction_loss = reconstruction_loss
         self.reconstruction_loss_fish = reconstruction_loss_fish
+        self.model_library =model_library
         # Automatically desactivate if useless
         self.n_batch = n_batch
         self.n_labels = n_labels
         self.n_latent_layers = 1
-
+        self.weight = weight
         if self.dispersion == "gene":
             self.px_r = torch.nn.Parameter(torch.randn(n_input, ))
         elif self.dispersion == "gene-batch":
@@ -77,9 +77,15 @@ class VAEF(nn.Module):
         # The last layers of the encoder are shared
         self.z_final_encoder = Encoder(n_hidden, n_latent, n_hidden=n_hidden, n_layers=n_layers,
                                        dropout_rate=dropout_rate)
+        self.l_encoder_fish = Encoder(self.n_input_fish, 1, n_hidden=n_hidden, n_layers=1,
+                                       dropout_rate=dropout_rate)
+        self.l_encoder = Encoder(n_input, 1, n_hidden=n_hidden, n_layers=1,
+                                 dropout_rate=dropout_rate)
 
-        self.decoder = DecoderSCVI(n_latent, n_input, n_layers=n_layers, n_hidden=n_hidden, n_cat_list=[2],
+        self.decoder = DecoderSCVI(n_latent, n_input, n_layers=n_layers_decoder, n_hidden=n_hidden, n_cat_list=[n_batch],
                                    dropout_rate=dropout_rate)
+
+        self.classifier = Classifier(n_latent, n_labels=n_labels, n_hidden=128, n_layers=3)
 
     def get_latents(self, x, y=None):
         return [self.sample_from_posterior_z(x, y)]
@@ -97,6 +103,14 @@ class VAEF(nn.Module):
             z = qz_m
         return z
 
+    def sample_from_posterior_l(self, x, mode="scRNA"):
+        x = torch.log(1 + x)
+        if mode == "scRNA":
+            ql_m, ql_v, library = self.l_encoder(x)
+        elif mode == "smFISH":
+            ql_m, ql_v, library = self.l_encoder_fish(x)
+        return library
+
     def get_sample_scale(self, x, mode="scRNA", batch_index=None, y=None):
         z = self.sample_from_posterior_z(x, y, mode)  # y only used in VAEC
         px = self.decoder.px_decoder(z, batch_index, y)  # y only used in VAEC
@@ -110,8 +124,27 @@ class VAEF(nn.Module):
         else:
             library = torch.log(torch.sum(x[:, self.indexes_to_keep], dim=1)).view(-1, 1)
             batch_index = torch.ones_like(library)
+
+        if self.model_library:
+            library = self.sample_from_posterior_l(x, mode=mode)
         px_scale = self.get_sample_scale(x, batch_index=batch_index, y=y)
         return px_scale * torch.exp(library)
+
+    def get_sample_rate_fish(self, x, y=None):
+        library = torch.log(torch.sum(x[:, self.indexes_to_keep], dim=1)).view(-1, 1)
+        batch_index = torch.ones_like(library)
+
+        if self.model_library:
+            library = self.sample_from_posterior_l(x, mode="smFISH")
+        px_scale = self.get_sample_scale(x, mode="smFISH", batch_index=batch_index, y=y)
+        px_scale = px_scale[:, self.indexes_to_keep] / torch.sum(px_scale[:, self.indexes_to_keep],
+                                                                 dim=1).view(-1, 1)
+        return px_scale * torch.exp(library)
+
+
+    def classify(self, x, mode="scRNA"):
+        z = self.sample_from_posterior_z(x, mode)
+        return self.classifier(z)
 
     def _reconstruction_loss(self, x, px_rate, px_r, px_dropout, batch_index, y, mode="scRNA"):
         if self.dispersion == "gene-label":
@@ -127,11 +160,12 @@ class VAEF(nn.Module):
                 reconst_loss = -log_zinb_positive(x, px_rate, torch.exp(px_r), px_dropout)
             elif self.reconstruction_loss == 'nb':
                 reconst_loss = -log_nb_positive(x, px_rate, torch.exp(px_r))
+
         elif mode == "smFISH":
             if self.reconstruction_loss_fish == 'poisson':
                 reconst_loss = -torch.sum(Poisson(px_rate).log_prob(x), dim=1)
             elif self.reconstruction_loss_fish == 'gaussian':
-                reconst_loss = -torch.sum(Normal(px_rate, 1).log_prob(x), dim=1)
+                reconst_loss = -torch.sum(Normal(px_rate, 10).log_prob(x), dim=1)
         return reconst_loss
 
     def forward(self, x, local_l_mean, local_l_var, batch_index=None, y=None, mode="scRNA"):
@@ -148,22 +182,38 @@ class VAEF(nn.Module):
             qz_m, qz_v, z = self.z_encoder_fish(x_[:, self.indexes_to_keep])
             library = torch.log(torch.sum(x[:, self.indexes_to_keep], dim=1)).view(-1, 1)
             batch_index = torch.ones_like(library)
-        qz_m, qz_v, z = self.z_final_encoder(qz_m)
+        if self.model_library:
+            if mode == "scRNA":
+                ql_m, ql_v, library = self.l_encoder(x_)
+            elif mode == "smFISH":
+                ql_m, ql_v, library = self.l_encoder_fish(x_[:, self.indexes_to_keep])
+
+        qz_m, qz_v, z = self.z_final_encoder(z)
         px_scale, px_r, px_rate, px_dropout = self.decoder(self.dispersion, z, library, batch_index)
 
         # rescaling the expected frequencies
         if mode == "smFISH":
-            x = x[:, self.indexes_to_keep]
-            px_scale = px_scale[:, :self.n_input_fish] / torch.sum(px_scale[:, :self.n_input_fish], dim=1).view(-1, 1)
-            px_rate = px_scale * torch.exp(library)
+            if self.model_library:
+                px_rate = px_scale[:, self.indexes_to_keep] * torch.exp(library)
+                reconst_loss = self._reconstruction_loss(x[:, self.indexes_to_keep], px_rate, px_r, px_dropout, batch_index, y, mode)
+            else:
+                px_scale = px_scale[:, self.indexes_to_keep] / torch.sum(px_scale[:, self.indexes_to_keep],
+                                                                          dim=1).view(-1, 1)
+                px_rate = px_scale * torch.exp(library)
+                reconst_loss = self._reconstruction_loss(x[:, self.indexes_to_keep], px_rate, px_r, px_dropout, batch_index, y, mode)
 
-        reconst_loss = self._reconstruction_loss(x, px_rate, px_r, px_dropout, batch_index, y, mode)
+        else:
+            reconst_loss = self._reconstruction_loss(x, px_rate, px_r, px_dropout, batch_index, y, mode)
 
         # KL Divergence
         mean = torch.zeros_like(qz_m)
         scale = torch.ones_like(qz_v)
 
         kl_divergence_z = kl(Normal(qz_m, torch.sqrt(qz_v)), Normal(mean, scale)).sum(dim=1)
-        kl_divergence = kl_divergence_z
+        if self.model_library:
+            kl_divergence_l = kl(Normal(ql_m, torch.sqrt(ql_v)), Normal(local_l_mean, torch.sqrt(local_l_var))).sum(dim=1)
+            kl_divergence = kl_divergence_z + kl_divergence_l
+        else:
+            kl_divergence = kl_divergence_z
 
         return reconst_loss, kl_divergence

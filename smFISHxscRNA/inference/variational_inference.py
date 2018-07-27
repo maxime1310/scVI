@@ -41,21 +41,24 @@ class VariationalInferenceFish(InferenceFish):
     """
     default_metrics_to_monitor = ['ll']
 
-    def __init__(self, model, gene_dataset_seq, gene_dataset_fish, train_size=0.8, use_cuda=True, **kwargs):
+    def __init__(self, model, gene_dataset_seq, gene_dataset_fish, train_size=0.8, use_cuda=True, cl_ratio=0,
+                 fish_ponderation=1, **kwargs):
         super(VariationalInferenceFish, self).__init__(model, gene_dataset_seq, gene_dataset_fish, use_cuda=use_cuda, **kwargs)
         self.kl = None
+        self.cl_ratio = cl_ratio
+        self.fish_ponderation = fish_ponderation
         self.data_loaders = TrainTestDataLoadersFish(self.gene_dataset_seq, self.gene_dataset_fish,
                                                      train_size=train_size, use_cuda=use_cuda)
 
     def loss(self, tensors_seq, tensors_fish):
-        sample_batch, local_l_mean, local_l_var, batch_index, _ = tensors_seq
+        sample_batch, local_l_mean, local_l_var, batch_index, labels = tensors_seq
         reconst_loss, kl_divergence = self.model(sample_batch, local_l_mean, local_l_var, batch_index, mode="scRNA")
+        reconst_loss += self.cl_ratio * F.cross_entropy(self.model.classify(sample_batch, mode="scRNA"), labels.view(-1))
         loss = torch.mean(reconst_loss + self.kl_weight * kl_divergence)
-        sample_batch_fish, local_l_mean, local_l_var, batch_index, _ = tensors_fish
-        reconst_loss, kl_divergence = self.model(sample_batch_fish, local_l_mean, local_l_var, batch_index, mode="smFISH")
-        loss_fish = torch.mean(reconst_loss + self.kl_weight * kl_divergence)
-                    # * self.model.n_input / self.model.n_input_fish
-        loss = loss * sample_batch.size(0) + loss_fish * sample_batch_fish.size(0)
+        sample_batch_fish, local_l_mean, local_l_var, batch_index_fish, _, _, _ = tensors_fish
+        reconst_loss_fish, kl_divergence_fish = self.model(sample_batch_fish, local_l_mean, local_l_var, batch_index_fish, mode="smFISH")
+        loss_fish = torch.mean(reconst_loss_fish + self.kl_weight * kl_divergence_fish)
+        loss = loss * sample_batch.size(0) + loss_fish * sample_batch_fish.size(0) * self.fish_ponderation
         loss /= (sample_batch.size(0) + sample_batch_fish.size(0))
         return loss + loss_fish
 

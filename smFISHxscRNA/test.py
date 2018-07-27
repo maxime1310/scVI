@@ -20,7 +20,7 @@ genes_to_discard = l
 # The "genes_to_discard" argument is given here so that the order of the genes in CortexDataset matches
 # the order in SmfishDataset
 gene_dataset_seq = CortexDataset(genes_fish=gene_dataset_fish.gene_names, genes_to_discard=genes_to_discard,
-                                 genes_to_keep=["mog", "sst", "gja1"], additional_genes=70)
+                                 genes_to_keep=["mog", "sst", "gja1", "ctss"], additional_genes=500)
 
 # Getting indexes of genes to ignore during training (to validate the imputation task)
 print(gene_dataset_seq.gene_names)
@@ -49,14 +49,14 @@ data_loader_fish = DataLoader(gene_dataset, batch_size=128, pin_memory=use_cuda,
                                sampler=SubsetRandomSampler(example_indices[:tt_split]),
                                collate_fn=gene_dataset.collate_fn)
 
-vae = VAEF(gene_dataset_seq.nb_genes, gene_dataset_fish.nb_genes, genes_to_discard=genes_to_discard, n_latent=8,
-           n_layers=2, n_hidden=256, reconstruction_loss='nb', dropout_rate=0.4)
+vae = VAEF(gene_dataset_seq.nb_genes, gene_dataset_fish.nb_genes, indexes_fish_train=genes_to_discard, n_latent=8,
+           n_layers=2, n_hidden=300, reconstruction_loss='nb', dropout_rate=0.4)
 train_FISHVAE_jointly(vae, data_loader_seq, data_loader_fish, lr=0.008, n_epochs=1)
-# infer = VariationalInferenceFish(vae, gene_dataset_seq, gene_dataset_fish, train_size=0.9, verbose=True, frequency=5)
-# infer.train(n_epochs=250, lr=0.0008)
+#infer = VariationalInferenceFish(vae, gene_dataset_seq, gene_dataset_fish, train_size=0.9, verbose=True, frequency=5)
+#infer.train(n_epochs=200, lr=0.0008)
 #
-# data_loader_fish = infer.data_loaders['train_fish']
-# data_loader_seq = infer.data_loaders['train_seq']
+#data_loader_fish = infer.data_loaders['train_fish']
+#data_loader_seq = infer.data_loaders['train_seq']
 
 latent_seq, _, labels_seq, expected_frequencies_seq, values_seq = get_data(vae, data_loader_seq, mode="scRNA")
 latent_fish, _, labels_fish, expected_frequencies_fish, values_fish, x_coords, y_coords = get_data(vae, data_loader_fish, mode="smFISH")

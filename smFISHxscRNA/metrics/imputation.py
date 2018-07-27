@@ -1,6 +1,40 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from sklearn import neighbors
+from scipy.stats import kde
+import matplotlib.pyplot as plt
+
+
+def plot_imputation(imputed, original):
+    x, y = imputed, original
+    ymax = np.amax(y)
+    mask = x < ymax
+    x = x[mask]
+    y = y[mask]
+    mask = y < ymax
+    x = x[mask]
+    y = y[mask]
+    data = np.vstack([x, y])
+    plt.figure(figsize=(5, 5))
+    axes = plt.gca()
+    axes.set_xlim([0, ymax])
+    axes.set_ylim([0, ymax])
+    nbins = 150
+    # Evaluate a gaussian kde on a regular grid of nbins x nbins over data extents
+    k = kde.gaussian_kde(data)
+    xi, yi = np.mgrid[0:ymax:nbins * 1j, 0:ymax:nbins * 1j]
+    zi = k(np.vstack([xi.flatten(), yi.flatten()]))
+
+    plt.title('Imputation', fontsize=12)
+    plt.ylabel("Imputed counts")
+    plt.xlabel('Original counts')
+
+    plt.pcolormesh(yi, xi, zi.reshape(xi.shape), cmap="Reds")
+
+    a, _, _, _ = np.linalg.lstsq(y[:, np.newaxis], x)
+    l = np.linspace(0, ymax)
+    plt.plot(l, a * l, color='black')
+
+    plt.plot(l, l, color='black', linestyle=":")
 
 
 def proximity_imputation(real_latent1, normed_gene_exp_1, real_latent2, k=4):

@@ -39,6 +39,7 @@ class CortexDataset(GeneExpressionDataset):
     def __init__(self, save_path='data/', genes_fish=None, genes_to_discard=None,
                  genes_to_keep=None, additional_genes=558):
         # Generating samples according to a ZINB process
+
         self.save_path = save_path
         self.download_name = 'expression.bin'
         self.url = "https://storage.googleapis.com/linnarsson-lab-www-blobs/blobs/cortex/" \
@@ -81,6 +82,8 @@ class CortexDataset(GeneExpressionDataset):
 
         expression_data = np.array(rows, dtype=np.int).T[1:]
         gene_names = np.array(gene_names, dtype=np.str)
+
+        # Getting the indexes to keep
         selected_fish = []
         if self.genes_fish is not None:
             for gene_fish in self.genes_fish:
@@ -93,16 +96,14 @@ class CortexDataset(GeneExpressionDataset):
                 for gene_cortex in range(len(gene_names)):
                     if gene_names[gene_cortex].lower() == gene.lower():
                         to_keep.append(gene_cortex)
+
         selected = np.std(expression_data, axis=0).argsort()[-self.additional_genes:][::-1]
         selected = np.unique(np.concatenate((selected, np.array(to_keep), np.array(selected_fish))))
         selected = np.array([int(select) for select in selected])
         expression_data = expression_data[:, selected]
         gene_names = gene_names[selected]
-
-        indexes_to_keep = np.arange(len(self.genes_fish))
-        indexes_to_keep = np.delete(indexes_to_keep, self.genes_to_discard)
-        expression_data, gene_names = reorganize(expression_data, gene_names, self.genes_fish[indexes_to_keep])
-        umi = np.sum(expression_data, axis=1)
+        expression_data, gene_names = reorganize(expression_data, gene_names, self.genes_fish)
+        umi = np.sum(expression_data[:, :len(self.genes_fish)], axis=1)
         expression_data = expression_data[umi > 10, :]
         labels = labels[umi > 10]
         print("Finished preprocessing Cortex data")

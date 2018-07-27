@@ -31,6 +31,7 @@ def get_latent(vae, data_loader, mode):
 
 
 def get_data(vae, data_loader, mode):
+    vae.eval()
     latent = []
     batch_indices = []
     labels = []
@@ -59,6 +60,27 @@ def get_data(vae, data_loader, mode):
         return np.array(torch.cat(latent)), np.array(torch.cat(batch_indices)), np.array(torch.cat(labels)).ravel(), \
                np.array(torch.cat(expected_frequencies)), np.array(torch.cat(values)),\
                np.array(torch.cat(x_coords)), np.array(torch.cat(y_coords))
+
+
+def get_estimated_values(vae, data_loader, mode):
+    vae.eval()
+    expected_values = []
+    values = []
+    for tensors in data_loader:
+        if mode == "scRNA":
+            sample_batch, local_l_mean, local_l_var, batch_index, label = tensors
+            batch_index = torch.zeros_like(batch_index)
+            expected_values += [vae.get_sample_rate(sample_batch, mode=mode)]
+            values += [sample_batch]
+        if mode == "smFISH":
+            sample_batch, local_l_mean, local_l_var, batch_index, label, x_coord, y_coord = tensors
+            batch_index = torch.ones_like(batch_index)
+            expected_values += [vae.get_sample_rate_fish(sample_batch)]
+            values += [sample_batch]
+    if mode == "scRNA":
+        return np.array(torch.cat(expected_values)), np.array(torch.cat(values))
+    if mode == "smFISH":
+        return np.array(torch.cat(expected_values)), np.array(torch.cat(values))
 
 
 def get_common_t_sne(latent_a, latent_b, n_samples=1000):

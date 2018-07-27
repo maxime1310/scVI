@@ -8,7 +8,10 @@ def compute_log_likelihood(vae, data_loader, mode):
     # Iterate once over the data_loader and computes the total log_likelihood
     log_lkl = 0
     for i_batch, tensors in enumerate(data_loader):
-        sample_batch, local_l_mean, local_l_var, batch_index, labels = tensors
+        if mode == "scRNA":
+            sample_batch, local_l_mean, local_l_var, batch_index, labels = tensors
+        if mode =="smFISH":
+            sample_batch, local_l_mean, local_l_var, batch_index, labels, _, _ = tensors
         reconst_loss, kl_divergence = vae(sample_batch, local_l_mean, local_l_var, batch_index=batch_index,
                                           y=labels, mode=mode)
         log_lkl += torch.sum(reconst_loss).item()

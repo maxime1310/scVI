@@ -30,10 +30,11 @@ class InferenceFish:
 
     def __init__(self, model, gene_dataset_seq, gene_dataset_fish, use_cuda=True, metrics_to_monitor=None,
                  data_loaders=None, benchmark=False,
-                 verbose=False, frequency=None, save_best_state_metric=None, on=None):
+                 verbose=False, frequency=None, save_best_state_metric=None, on=None, weight_decay=0.25):
         self.model = model
         self.gene_dataset_seq = gene_dataset_seq
         self.gene_dataset_fish = gene_dataset_fish
+        self.weight_decay = weight_decay
         self.data_loaders = data_loaders
         self.benchmark = benchmark
         self.epoch = 0
@@ -74,7 +75,7 @@ class InferenceFish:
             if params is None:
                 params = filter(lambda p: p.requires_grad, self.model.parameters())
 
-            optimizer = torch.optim.Adam(params, lr=lr, eps=0.01, weight_decay=0.15)
+            optimizer = torch.optim.Adam(params, lr=lr, eps=0.01, weight_decay=self.weight_decay)
 
             self.epoch = 0
             self.n_epochs = n_epochs
